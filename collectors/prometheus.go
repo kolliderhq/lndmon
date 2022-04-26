@@ -97,7 +97,6 @@ func NewPrometheusExporter(cfg *PrometheusConfig, lnd *lndclient.LndServices,
 			NewChannelsCollector(
 				lnd.Client, errChan, monitoringCfg,
 			),
-			NewWalletCollector(lnd, errChan),
 			NewPeerCollector(lnd.Client, errChan),
 			NewInfoCollector(lnd.Client, errChan),
 		},
