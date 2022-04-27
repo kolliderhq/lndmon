@@ -25,9 +25,6 @@ type ChannelsCollector struct {
 	numPendingChansDesc  *prometheus.Desc
 	numClosedChannels    *prometheus.Desc
 
-	satsSentDesc *prometheus.Desc
-	satsRecvDesc *prometheus.Desc
-
 	numUpdatesDesc *prometheus.Desc
 
 	csvDelayDesc         *prometheus.Desc
@@ -133,16 +130,6 @@ func NewChannelsCollector(lnd lndclient.LightningClient, errChan chan<- error,
 			"weight of the commitment transaction",
 			labels, nil,
 		),
-		satsSentDesc: prometheus.NewDesc(
-			"lnd_channels_sent_sat",
-			"total number of satoshis we’ve sent within this channel",
-			labels, nil,
-		),
-		satsRecvDesc: prometheus.NewDesc(
-			"lnd_channels_received_sat",
-			"total number of satoshis we’ve received within this channel",
-			labels, nil,
-		),
 		numUpdatesDesc: prometheus.NewDesc(
 			"lnd_channels_updates_count",
 			"total number of updates conducted within this channel",
@@ -180,9 +167,6 @@ func (c *ChannelsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.numActiveChansDesc
 	ch <- c.numInactiveChansDesc
 	ch <- c.numPendingChansDesc
-
-	ch <- c.satsSentDesc
-	ch <- c.satsRecvDesc
 
 	ch <- c.numUpdatesDesc
 
@@ -294,16 +278,6 @@ func (c *ChannelsCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(
 			c.numPendingHTLCsDesc, prometheus.GaugeValue,
 			float64(channel.NumPendingHtlcs), chanIdStr, status,
-			initiator, peer,
-		)
-		ch <- prometheus.MustNewConstMetric(
-			c.satsSentDesc, prometheus.GaugeValue,
-			float64(channel.TotalSent), chanIdStr, status,
-			initiator, peer,
-		)
-		ch <- prometheus.MustNewConstMetric(
-			c.satsRecvDesc, prometheus.GaugeValue,
-			float64(channel.TotalReceived), chanIdStr, status,
 			initiator, peer,
 		)
 		ch <- prometheus.MustNewConstMetric(
