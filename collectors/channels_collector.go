@@ -30,8 +30,6 @@ type ChannelsCollector struct {
 
 	numUpdatesDesc *prometheus.Desc
 
-	channelUptimeDesc *prometheus.Desc
-
 	csvDelayDesc         *prometheus.Desc
 	unsettledBalanceDesc *prometheus.Desc
 	feePerKwDesc         *prometheus.Desc
@@ -150,11 +148,6 @@ func NewChannelsCollector(lnd lndclient.LightningClient, errChan chan<- error,
 			"total number of updates conducted within this channel",
 			labels, nil,
 		),
-		channelUptimeDesc: prometheus.NewDesc(
-			"lnd_channel_uptime_percentage",
-			"uptime percentage for channel",
-			labels, nil,
-		),
 
 		// Use labels for the inbound fee for various amounts.
 		inboundFee: prometheus.NewDesc(
@@ -192,8 +185,6 @@ func (c *ChannelsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.satsRecvDesc
 
 	ch <- c.numUpdatesDesc
-
-	ch <- c.channelUptimeDesc
 
 	ch <- c.csvDelayDesc
 
@@ -345,15 +336,6 @@ func (c *ChannelsCollector) Collect(ch chan<- prometheus.Metric) {
 			float64(channel.CommitFee), chanIdStr, status,
 			initiator, peer,
 		)
-
-		// Only record uptime if the channel has been monitored.
-		if channel.LifeTime != 0 {
-			ch <- prometheus.MustNewConstMetric(
-				c.channelUptimeDesc, prometheus.GaugeValue,
-				float64(channel.Uptime)/float64(channel.LifeTime),
-				chanIdStr, status, initiator, peer,
-			)
-		}
 	}
 
 	// Get the list of pending channels

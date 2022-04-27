@@ -103,10 +103,6 @@ func NewPrometheusExporter(cfg *PrometheusConfig, lnd *lndclient.LndServices,
 		htlcMonitor.collectors()...,
 	)
 
-	if !monitoringCfg.DisableGraph {
-		collectors = append(collectors, NewGraphCollector(lnd.Client, errChan))
-	}
-
 	return &PrometheusExporter{
 		cfg:           cfg,
 		lnd:           lnd,
