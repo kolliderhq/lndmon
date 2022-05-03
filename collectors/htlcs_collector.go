@@ -66,6 +66,9 @@ type htlcMonitor struct {
 	// resolve.
 	resolutionTimeHistogram *prometheus.HistogramVec
 
+	// forwardHistogram tracks the amounts for forwarded htlcs.
+	forwardHistogram *prometheus.HistogramVec
+
 	// quit is closed to signal that we need to shutdown.
 	quit chan struct{}
 
@@ -108,6 +111,18 @@ func newHtlcMonitor(router lndclient.RouterClient,
 			},
 			htlcLabels,
 		),
+		forwardHistogram: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: "lnd",
+				Subsystem: "htlcs",
+				Name:      "forward_amount",
+				Help:      "the amount (in sats) forwarded in a htlc",
+				Buckets: []float64{
+					1000, 10000, 100000, 1000000,
+				},
+			},
+			htlcLabels,
+		),
 		quit:    make(chan struct{}),
 		errChan: errChan,
 	}
@@ -132,7 +147,7 @@ func (h *htlcMonitor) stop() {
 // collectors returns all of the collectors that the htlc monitor uses.
 func (h *htlcMonitor) collectors() []prometheus.Collector {
 	return []prometheus.Collector{
-		h.resolvedCounter, h.resolutionTimeHistogram,
+		h.resolvedCounter, h.resolutionTimeHistogram, h.forwardHistogram,
 	}
 }
 
@@ -295,14 +310,13 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 		return nil
 	}
 	incomingMsat := originalHtlcEvent.GetForwardEvent().GetInfo().GetIncomingAmtMsat()
-	outgoingMsat := uint64(0)
-	fmt.Printf("incomingMsat = %d outgoingMsat = %d\n", incomingMsat, outgoingMsat)
+	outgoingMsat := originalHtlcEvent.GetForwardEvent().GetInfo().GetOutgoingAmtMsat()
 	if incomingMsat == 0 {
-		outgoingMsat = originalHtlcEvent.GetForwardEvent().GetInfo().GetOutgoingAmtMsat()
 		labels[amountLabel] = strconv.FormatUint(outgoingMsat/1000, 10)
 	} else {
 		labels[amountLabel] = strconv.FormatUint(incomingMsat/1000, 10)
 	}
+	fmt.Printf("incomingMsat = %d outgoingMsat = %d\n", incomingMsat, outgoingMsat)
 	h.resolvedCounter.With(labels).Add(1)
 
 	// If this HTLC was a receive, we have no originally forwarded htlc
@@ -335,6 +349,15 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 	h.resolutionTimeHistogram.With(
 		histogramLabels,
 	).Observe(ts.Sub(fwdTs).Seconds())
+
+	amountFloat, err := strconv.ParseFloat(labels[amountLabel], 64)
+	if err != nil {
+		htlcLogger.Infof("failed to convert amount to float64 %v", err)
+		return nil
+	}
+	h.forwardHistogram.With(
+		histogramLabels,
+	).Observe(amountFloat)
 
 	// Delete the htlc from our set of active htlcs.
 	delete(h.activeHtlcs, key)
