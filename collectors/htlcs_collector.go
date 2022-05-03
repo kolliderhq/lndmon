@@ -30,6 +30,7 @@ const (
 	chanInLabel  = "chan_in"
 	chanOutLabel = "chan_out"
 
+	amountLabel = "amount"
 	// failureReasonLabel is the variable label we use for failure reasons
 	// for forwards.
 	failureReasonLabel = "failure_reason"
@@ -217,14 +218,14 @@ func (h *htlcMonitor) processHtlcEvent(event *routerrpc.HtlcEvent) error {
 		h.activeHtlcs[key] = ts
 
 	case *routerrpc.HtlcEvent_SettleEvent:
-		err := h.recordResolution(key, event.EventType, ts, "")
+		err := h.recordResolution(event, key, event.EventType, ts, "")
 		if err != nil {
 			return err
 		}
 
 	case *routerrpc.HtlcEvent_ForwardFailEvent:
 		err := h.recordResolution(
-			key, event.EventType, ts, failureReasonExternal,
+			nil, key, event.EventType, ts, failureReasonExternal,
 		)
 		if err != nil {
 			return err
@@ -232,7 +233,7 @@ func (h *htlcMonitor) processHtlcEvent(event *routerrpc.HtlcEvent) error {
 
 	case *routerrpc.HtlcEvent_LinkFailEvent:
 		err := h.recordResolution(
-			key, event.EventType, ts, e.LinkFailEvent.FailureString,
+			nil, key, event.EventType, ts, e.LinkFailEvent.FailureString,
 		)
 		if err != nil {
 			return err
@@ -248,10 +249,19 @@ func (h *htlcMonitor) processHtlcEvent(event *routerrpc.HtlcEvent) error {
 // recordResolution records the outcome of a htlc resolution (settle/fail) in
 // our metrics. The failure reason string should be empty for all successful
 // forwards, and populated for all failures.
-func (h *htlcMonitor) recordResolution(key htlcswitch.HtlcKey,
+func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.HtlcKey,
 	eventType routerrpc.HtlcEvent_EventType, ts time.Time,
 	failureReason string) error {
-
+	var amount = "0"
+	if evt != nil {
+		switch evt.Event.(type) {
+		case *routerrpc.HtlcEvent_SettleEvent:
+			incomingMsat := evt.GetForwardEvent().GetInfo().GetIncomingAmtMsat()
+			amount = strconv.FormatUint(incomingMsat/1000, 10)
+		default:
+			fmt.Printf("skipping htlc event that is not settlement\n")
+		}
+	}
 	// Create the set of labels we want to track this resolution. Remove
 	// spaces from our failure reason so that it can be used as a prometheus
 	// label.
@@ -266,6 +276,7 @@ func (h *htlcMonitor) recordResolution(key htlcswitch.HtlcKey,
 		failureReasonLabel: strings.ToLower(strings.ReplaceAll(
 			failureReason, " ", "_",
 		)),
+		amountLabel: amount,
 	}
 	if failureReason == "" {
 		labels[outcomeLabel] = outcomeSettledValue
