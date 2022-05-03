@@ -56,6 +56,8 @@ type htlcMonitor struct {
 	// htlcs.
 	resolvedCounter *prometheus.CounterVec
 
+	forwardHtlcs map[htlcswitch.HtlcKey]*routerrpc.HtlcEvent
+
 	// activeHtlcs holds a map of our currently active htlcs to their
 	// original forward time.
 	activeHtlcs map[htlcswitch.HtlcKey]time.Time
@@ -78,8 +80,9 @@ func newHtlcMonitor(router lndclient.RouterClient,
 	errChan chan error) *htlcMonitor {
 
 	return &htlcMonitor{
-		router:      router,
-		activeHtlcs: make(map[htlcswitch.HtlcKey]time.Time),
+		router:       router,
+		forwardHtlcs: make(map[htlcswitch.HtlcKey]*routerrpc.HtlcEvent),
+		activeHtlcs:  make(map[htlcswitch.HtlcKey]time.Time),
 		resolvedCounter: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "lnd",
 			Subsystem: "htlcs",
@@ -213,7 +216,7 @@ func (h *htlcMonitor) processHtlcEvent(event *routerrpc.HtlcEvent) error {
 			htlcLogger.Infof("htlc: %v replayed", key)
 			return nil
 		}
-
+		h.forwardHtlcs[key] = event
 		// Add to our set of known active htlcs.
 		h.activeHtlcs[key] = ts
 
@@ -252,23 +255,6 @@ func (h *htlcMonitor) processHtlcEvent(event *routerrpc.HtlcEvent) error {
 func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.HtlcKey,
 	eventType routerrpc.HtlcEvent_EventType, ts time.Time,
 	failureReason string) error {
-	var amount = "0"
-	if evt != nil {
-		switch evt.Event.(type) {
-		case *routerrpc.HtlcEvent_SettleEvent:
-			incomingMsat := evt.GetForwardEvent().GetInfo().GetIncomingAmtMsat()
-			outgoingMsat := uint64(0)
-			fmt.Printf("incomingMsat = %d outgoingMsat = %d\n", incomingMsat, outgoingMsat)
-			if incomingMsat == 0 {
-				outgoingMsat = evt.GetForwardEvent().GetInfo().GetOutgoingAmtMsat()
-				amount = strconv.FormatUint(outgoingMsat/1000, 10)
-			} else {
-				amount = strconv.FormatUint(incomingMsat/1000, 10)
-			}
-		default:
-			fmt.Printf("skipping htlc event that is not settlement\n")
-		}
-	}
 	// Create the set of labels we want to track this resolution. Remove
 	// spaces from our failure reason so that it can be used as a prometheus
 	// label.
@@ -283,7 +269,7 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 		failureReasonLabel: strings.ToLower(strings.ReplaceAll(
 			failureReason, " ", "_",
 		)),
-		amountLabel: amount,
+		amountLabel: "0",
 	}
 	if failureReason == "" {
 		labels[outcomeLabel] = outcomeSettledValue
@@ -303,6 +289,20 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 		return fmt.Errorf("unknown event type: %v", eventType)
 	}
 
+	originalHtlcEvent, ok := h.forwardHtlcs[key]
+	if !ok {
+		htlcLogger.Infof("unable to find original htlc event", key)
+		return nil
+	}
+	incomingMsat := originalHtlcEvent.GetForwardEvent().GetInfo().GetIncomingAmtMsat()
+	outgoingMsat := uint64(0)
+	fmt.Printf("incomingMsat = %d outgoingMsat = %d\n", incomingMsat, outgoingMsat)
+	if incomingMsat == 0 {
+		outgoingMsat = originalHtlcEvent.GetForwardEvent().GetInfo().GetOutgoingAmtMsat()
+		labels[amountLabel] = strconv.FormatUint(outgoingMsat/1000, 10)
+	} else {
+		labels[amountLabel] = strconv.FormatUint(incomingMsat/1000, 10)
+	}
 	h.resolvedCounter.With(labels).Add(1)
 
 	// If this HTLC was a receive, we have no originally forwarded htlc
@@ -338,5 +338,6 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 
 	// Delete the htlc from our set of active htlcs.
 	delete(h.activeHtlcs, key)
+	delete(h.forwardHtlcs, key)
 	return nil
 }
