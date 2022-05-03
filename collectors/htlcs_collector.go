@@ -95,7 +95,7 @@ func newHtlcMonitor(router lndclient.RouterClient,
 			Subsystem: "htlcs",
 			Name:      "forwarded_amt",
 			Help:      "count of forwarded sats",
-		}, htlcLabels),
+		}, append(htlcLabels, failureReasonLabel)),
 		resolutionTimeHistogram: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "lnd",
