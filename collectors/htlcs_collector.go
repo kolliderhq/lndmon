@@ -258,6 +258,7 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 		case *routerrpc.HtlcEvent_SettleEvent:
 			incomingMsat := evt.GetForwardEvent().GetInfo().GetIncomingAmtMsat()
 			outgoingMsat := uint64(0)
+			fmt.Printf("incomingMsat = %d outgoingMsat = %d\n", incomingMsat, outgoingMsat)
 			if incomingMsat == 0 {
 				outgoingMsat = evt.GetForwardEvent().GetInfo().GetOutgoingAmtMsat()
 				amount = strconv.FormatUint(outgoingMsat/1000, 10)
