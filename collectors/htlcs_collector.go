@@ -30,7 +30,6 @@ const (
 	chanInLabel  = "chan_in"
 	chanOutLabel = "chan_out"
 
-	amountLabel = "amount"
 	// failureReasonLabel is the variable label we use for failure reasons
 	// for forwards.
 	failureReasonLabel = "failure_reason"
@@ -42,7 +41,7 @@ const (
 )
 
 // htlcLabels is the set of labels we use to label htlc events.
-var htlcLabels = []string{outcomeLabel, chanInLabel, chanOutLabel, typeLabel, amountLabel}
+var htlcLabels = []string{outcomeLabel, chanInLabel, chanOutLabel, typeLabel}
 
 // htlcMonitor contains the elements required to monitor our htlc stream. Since
 // we collect metrics from a stream, rather than a set of custom polled metrics,
@@ -56,6 +55,8 @@ type htlcMonitor struct {
 	// htlcs.
 	resolvedCounter *prometheus.CounterVec
 
+	forwardedCounter *prometheus.CounterVec
+
 	forwardHtlcs map[htlcswitch.HtlcKey]*routerrpc.HtlcEvent
 
 	// activeHtlcs holds a map of our currently active htlcs to their
@@ -65,9 +66,6 @@ type htlcMonitor struct {
 	// resolutionTimeHistogram tracks the time it takes our htlcs to
 	// resolve.
 	resolutionTimeHistogram *prometheus.HistogramVec
-
-	// forwardHistogram tracks the amounts for forwarded htlcs.
-	forwardHistogram *prometheus.HistogramVec
 
 	// quit is closed to signal that we need to shutdown.
 	quit chan struct{}
@@ -92,6 +90,12 @@ func newHtlcMonitor(router lndclient.RouterClient,
 			Name:      "resolved_htlcs",
 			Help:      "count of resolved htlcs",
 		}, append(htlcLabels, failureReasonLabel)),
+		forwardedCounter: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "lnd",
+			Subsystem: "htlcs",
+			Name:      "forwarded_amt",
+			Help:      "count of forwarded sats",
+		}, htlcLabels),
 		resolutionTimeHistogram: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: "lnd",
@@ -107,18 +111,6 @@ func newHtlcMonitor(router lndclient.RouterClient,
 					1, 10, 60, 60 * 2, 60 * 5, 60 * 10,
 					60 * 60, 60 * 60 * 5, 60 * 60 * 24,
 					60 * 60 * 24 * 7,
-				},
-			},
-			htlcLabels,
-		),
-		forwardHistogram: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: "lnd",
-				Subsystem: "htlcs",
-				Name:      "forward_amount",
-				Help:      "the amount (in sats) forwarded in a htlc",
-				Buckets: []float64{
-					1000, 10000, 100000, 1000000,
 				},
 			},
 			htlcLabels,
@@ -147,7 +139,7 @@ func (h *htlcMonitor) stop() {
 // collectors returns all of the collectors that the htlc monitor uses.
 func (h *htlcMonitor) collectors() []prometheus.Collector {
 	return []prometheus.Collector{
-		h.resolvedCounter, h.resolutionTimeHistogram, h.forwardHistogram,
+		h.resolvedCounter, h.forwardedCounter, h.resolutionTimeHistogram,
 	}
 }
 
@@ -284,7 +276,6 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 		failureReasonLabel: strings.ToLower(strings.ReplaceAll(
 			failureReason, " ", "_",
 		)),
-		amountLabel: "0",
 	}
 	if failureReason == "" {
 		labels[outcomeLabel] = outcomeSettledValue
@@ -309,16 +300,10 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 		htlcLogger.Infof("unable to find original htlc event %s", key)
 		return nil
 	}
-	incomingMsat := originalHtlcEvent.GetForwardEvent().GetInfo().GetIncomingAmtMsat()
 	outgoingMsat := originalHtlcEvent.GetForwardEvent().GetInfo().GetOutgoingAmtMsat()
-	if incomingMsat == 0 {
-		labels[amountLabel] = strconv.FormatUint(outgoingMsat/1000, 10)
-	} else {
-		labels[amountLabel] = strconv.FormatUint(incomingMsat/1000, 10)
-	}
-	fmt.Printf("incomingMsat = %d outgoingMsat = %d\n", incomingMsat, outgoingMsat)
+	fmt.Printf("outgoingMsat = %d\n", outgoingMsat)
 	h.resolvedCounter.With(labels).Add(1)
-
+	h.forwardedCounter.With(labels).Add(float64(outgoingMsat / 1000))
 	// If this HTLC was a receive, we have no originally forwarded htlc
 	// tracked so we can return early.
 	if labels[typeLabel] == typeReceiveValue {
@@ -349,15 +334,6 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 	h.resolutionTimeHistogram.With(
 		histogramLabels,
 	).Observe(ts.Sub(fwdTs).Seconds())
-
-	amountFloat, err := strconv.ParseFloat(labels[amountLabel], 64)
-	if err != nil {
-		htlcLogger.Infof("failed to convert amount to float64 %v", err)
-		return nil
-	}
-	h.forwardHistogram.With(
-		histogramLabels,
-	).Observe(amountFloat)
 
 	// Delete the htlc from our set of active htlcs.
 	delete(h.activeHtlcs, key)
