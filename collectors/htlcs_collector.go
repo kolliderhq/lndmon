@@ -42,7 +42,7 @@ const (
 )
 
 // htlcLabels is the set of labels we use to label htlc events.
-var htlcLabels = []string{outcomeLabel, chanInLabel, chanOutLabel, typeLabel}
+var htlcLabels = []string{outcomeLabel, chanInLabel, chanOutLabel, typeLabel, amountLabel}
 
 // htlcMonitor contains the elements required to monitor our htlc stream. Since
 // we collect metrics from a stream, rather than a set of custom polled metrics,
@@ -257,7 +257,13 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 		switch evt.Event.(type) {
 		case *routerrpc.HtlcEvent_SettleEvent:
 			incomingMsat := evt.GetForwardEvent().GetInfo().GetIncomingAmtMsat()
-			amount = strconv.FormatUint(incomingMsat/1000, 10)
+			outgoingMsat := uint64(0)
+			if incomingMsat == 0 {
+				outgoingMsat = evt.GetForwardEvent().GetInfo().GetOutgoingAmtMsat()
+				amount = strconv.FormatUint(outgoingMsat/1000, 10)
+			} else {
+				amount = strconv.FormatUint(incomingMsat/1000, 10)
+			}
 		default:
 			fmt.Printf("skipping htlc event that is not settlement\n")
 		}
