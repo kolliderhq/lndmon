@@ -291,7 +291,7 @@ func (h *htlcMonitor) recordResolution(evt *routerrpc.HtlcEvent, key htlcswitch.
 
 	originalHtlcEvent, ok := h.forwardHtlcs[key]
 	if !ok {
-		htlcLogger.Infof("unable to find original htlc event", key)
+		htlcLogger.Infof("unable to find original htlc event %s", key)
 		return nil
 	}
 	incomingMsat := originalHtlcEvent.GetForwardEvent().GetInfo().GetIncomingAmtMsat()
